@@ -7,7 +7,7 @@ from fastapi import FastAPI, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
-from app.models import BrandRequest, BrandEventsResponse, SearchResponse, CsvRequest
+from app.models import BrandRequest, SearchResponse, CsvRequest
 from app.services.event_search import search_brand_events
 
 app = FastAPI(title="Brand Events Finder")

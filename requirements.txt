@@ -1,5 +1,4 @@
 fastapi
 uvicorn
-anthropic
 pydantic
-python-dotenv
+duckduckgo-search
