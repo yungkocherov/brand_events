@@ -83,8 +83,7 @@ def _analyze_with_mistral(
     brand: str, search_results: list[dict], year_from: int, year_to: int
 ) -> str:
     """Use Mistral to analyze search results."""
-    api_key = os.environ["MISTRAL_API_KEY"]
-    client = Mistral(api_key=api_key)
+    client = Mistral(api_key=os.environ["MISTRAL_API_KEY"])
 
     formatted = []
     for i, r in enumerate(search_results, 1):
@@ -95,10 +94,8 @@ def _analyze_with_mistral(
         )
     search_text = "\n\n".join(formatted)
     user_text = USER_PROMPT.format(
-        brand=brand,
-        search_results=search_text,
-        year_from=year_from,
-        year_to=year_to,
+        brand=brand, search_results=search_text,
+        year_from=year_from, year_to=year_to,
     )
 
     response = client.chat.complete(
