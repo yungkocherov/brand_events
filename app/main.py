@@ -3,6 +3,9 @@ import io
 import csv
 from datetime import date, timedelta
 
+from dotenv import load_dotenv
+load_dotenv()
+
 from fastapi import FastAPI, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse

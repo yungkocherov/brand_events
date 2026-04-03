@@ -2,3 +2,5 @@ fastapi
 uvicorn
 pydantic
 duckduckgo-search
+httpx
+python-dotenv

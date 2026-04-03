@@ -1,17 +1,22 @@
 import asyncio
 import json
-from functools import partial
+import os
+import xml.etree.ElementTree as ET
 
+import httpx
 from duckduckgo_search import DDGS
 
 from app.models import BrandEvent, BrandEventsResponse
 
 
+YANDEX_SEARCH_URL = "https://searchapi.api.cloud.yandex.net/v2/web/searchAsync"
+YANDEX_OPERATIONS_URL = "https://searchapi.api.cloud.yandex.net/v2/operations"
+
 SEARCH_QUERIES = [
-    "{brand} скандал суд штраф",
+    "{brand} скандал суд штраф новости",
     "{brand} ребрендинг новый продукт запуск",
-    "{brand} выручка санкции проблемы",
-    "{brand} партнёрство слияние поглощение",
+    "{brand} выручка санкции проблемы кризис",
+    "{brand} партнёрство слияние поглощение сделка",
 ]
 
 ANALYSIS_PROMPT = """\
@@ -43,23 +48,98 @@ ANALYSIS_PROMPT = """\
 """
 
 
-def _search_ddg(brand: str) -> list[dict]:
-    """Run multiple DuckDuckGo searches for a brand and collect results."""
-    all_results = []
-    with DDGS() as ddgs:
-        for query_template in SEARCH_QUERIES:
-            query = query_template.format(brand=brand)
-            try:
-                results = list(ddgs.text(query, max_results=5))
-                all_results.extend(results)
-            except Exception:
+async def _yandex_search(client: httpx.AsyncClient, query: str) -> list[dict]:
+    """Run a single Yandex search query and return parsed results."""
+    api_key = os.environ["YANDEX_SEARCH_API_KEY"]
+    folder_id = os.environ["YANDEX_FOLDER_ID"]
+
+    body = {
+        "query": {
+            "searchType": "SEARCH_TYPE_RU",
+            "queryText": query,
+            "page": "0",
+        },
+        "groupSpec": {
+            "groupMode": "GROUP_MODE_FLAT",
+            "groupsOnPage": "10",
+            "docsInGroup": "1",
+        },
+        "folderId": folder_id,
+        "responseFormat": "FORMAT_XML",
+    }
+
+    # Start async search
+    resp = await client.post(
+        YANDEX_SEARCH_URL,
+        headers={"Authorization": f"Api-Key {api_key}"},
+        json=body,
+    )
+    if resp.status_code != 200:
+        return []
+
+    operation = resp.json()
+    operation_id = operation.get("id")
+    if not operation_id:
+        return []
+
+    # Poll for results
+    for _ in range(15):
+        await asyncio.sleep(1)
+        poll_resp = await client.get(
+            f"{YANDEX_OPERATIONS_URL}/{operation_id}",
+            headers={"Authorization": f"Api-Key {api_key}"},
+        )
+        if poll_resp.status_code != 200:
+            continue
+        poll_data = poll_resp.json()
+        if poll_data.get("done"):
+            return _parse_yandex_xml(poll_data)
+
+    return []
+
+
+def _parse_yandex_xml(operation_data: dict) -> list[dict]:
+    """Parse Yandex XML response from operation result."""
+    response_data = operation_data.get("response", {})
+    raw_xml = response_data.get("rawData", "")
+    if not raw_xml:
+        return []
+
+    results = []
+    try:
+        root = ET.fromstring(raw_xml)
+        # Yandex XML uses namespace sometimes; search without namespace too
+        for group in root.iter("group"):
+            doc = group.find(".//doc")
+            if doc is None:
                 continue
-    return all_results
+            url_el = doc.find("url")
+            title_el = doc.find("title")
+            snippet_el = doc.find("passages")
+
+            url = url_el.text if url_el is not None else ""
+            title = _xml_text(title_el) if title_el is not None else ""
+            snippet = _xml_text(snippet_el) if snippet_el is not None else ""
+
+            if url:
+                results.append({
+                    "title": title,
+                    "href": url,
+                    "body": snippet,
+                })
+    except ET.ParseError:
+        pass
+
+    return results
+
+
+def _xml_text(element) -> str:
+    """Extract all text from an XML element and its children."""
+    return "".join(element.itertext()).strip()
 
 
 def _analyze_with_chat(brand: str, search_results: list[dict]) -> str:
     """Use DuckDuckGo AI chat to analyze search results."""
-    # Format search results for the prompt
     formatted = []
     for i, r in enumerate(search_results, 1):
         formatted.append(
@@ -76,23 +156,38 @@ def _analyze_with_chat(brand: str, search_results: list[dict]) -> str:
 
 
 async def search_brand_events(brand: str) -> BrandEventsResponse:
-    loop = asyncio.get_event_loop()
+    # Step 1: search Yandex
+    all_results = []
+    async with httpx.AsyncClient(timeout=30) as client:
+        tasks = [
+            _yandex_search(client, q.format(brand=brand))
+            for q in SEARCH_QUERIES
+        ]
+        results_lists = await asyncio.gather(*tasks, return_exceptions=True)
+        for res in results_lists:
+            if isinstance(res, list):
+                all_results.extend(res)
 
-    # Step 1: search the web
-    search_results = await loop.run_in_executor(
-        None, partial(_search_ddg, brand)
-    )
-
-    if not search_results:
+    if not all_results:
         return BrandEventsResponse(brand=brand, events=[])
 
+    # Deduplicate by URL
+    seen_urls = set()
+    unique_results = []
+    for r in all_results:
+        url = r.get("href", "")
+        if url and url not in seen_urls:
+            seen_urls.add(url)
+            unique_results.append(r)
+
     # Step 2: analyze with AI chat
+    loop = asyncio.get_event_loop()
     ai_response = await loop.run_in_executor(
-        None, partial(_analyze_with_chat, brand, search_results)
+        None, _analyze_with_chat, brand, unique_results
     )
 
     # Step 3: parse
-    events = _parse_events(ai_response, brand, search_results)
+    events = _parse_events(ai_response, brand, unique_results)
     return BrandEventsResponse(brand=brand, events=events)
 
 
@@ -102,44 +197,33 @@ def _parse_events(
     """Parse events JSON from AI response."""
     text = text.strip()
 
-    # Remove markdown code fences if present
     if "```" in text:
         lines = text.split("\n")
         lines = [l for l in lines if not l.strip().startswith("```")]
         text = "\n".join(lines)
 
-    # Find JSON array
     start = text.find("[")
     end = text.rfind("]")
     if start == -1 or end == -1:
         return []
 
-    json_str = text[start : end + 1]
-
     try:
-        data = json.loads(json_str)
+        data = json.loads(text[start : end + 1])
     except json.JSONDecodeError:
         return []
 
-    # Build a lookup of real URLs from search results
-    real_urls = {r.get("href", ""): r.get("title", "") for r in search_results}
-
+    real_urls = {r.get("href", "") for r in search_results}
     events = []
     for item in data:
         source_url = item.get("source_url", "")
-        # If the AI hallucinated a URL, try to find the closest real one
-        if source_url and source_url not in real_urls:
-            for real_url in real_urls:
-                if real_url and any(
-                    kw in real_url
-                    for kw in item.get("event_name", "").lower().split()[:2]
-                ):
-                    source_url = real_url
+        if source_url not in real_urls:
+            # Try to find a matching real URL
+            for r in search_results:
+                href = r.get("href", "")
+                name_words = item.get("event_name", "").lower().split()[:2]
+                if href and any(w in href.lower() for w in name_words if len(w) > 3):
+                    source_url = href
                     break
-            else:
-                # Fallback: use first search result URL
-                if search_results:
-                    source_url = search_results[0].get("href", source_url)
 
         try:
             events.append(
