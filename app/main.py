@@ -8,6 +8,8 @@ from fastapi import FastAPI, Response
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from pydantic import BaseModel
+
 from app.models import BrandRequest, SearchResponse, CsvRequest
 from app.services.event_search import search_brand_events, EVENT_TYPES
 
@@ -22,6 +24,25 @@ async def index():
 @app.get("/api/event-types")
 async def get_event_types():
     return {k: v["label"] for k, v in EVENT_TYPES.items()}
+
+
+class CheckKeyRequest(BaseModel):
+    api_key: str
+
+
+@app.post("/api/check-key")
+async def check_key(request: CheckKeyRequest):
+    from mistralai.client import Mistral
+    try:
+        client = Mistral(api_key=request.api_key)
+        client.chat.complete(
+            model="mistral-small-latest",
+            messages=[{"role": "user", "content": "hi"}],
+            max_tokens=1,
+        )
+        return {"ok": True}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 
 
 @app.post("/api/search", response_model=SearchResponse)

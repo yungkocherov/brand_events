@@ -305,8 +305,12 @@
         <div class="input-section">
             <label for="apiKey">Mistral API Key <span style="font-weight:400;color:#94a3b8">(необязательно)</span></label>
             <p class="hint">Ключ сохраняется в браузере и не отправляется на сторонние серверы</p>
-            <input type="password" id="apiKey" placeholder="Вставьте ключ с console.mistral.ai"
-                   style="width:100%;padding:10px 12px;border:1px solid #cbd5e1;border-radius:10px;font-size:0.9rem;font-family:inherit;margin-bottom:16px">
+            <div style="display:flex;gap:8px;align-items:center;margin-bottom:16px">
+                <input type="password" id="apiKey" placeholder="Вставьте ключ с console.mistral.ai"
+                       style="flex:1;padding:10px 12px;border:1px solid #cbd5e1;border-radius:10px;font-size:0.9rem;font-family:inherit">
+                <button class="btn btn-outline btn-sm" onclick="checkApiKey()" id="checkKeyBtn">Проверить</button>
+                <span id="keyStatus" style="font-size:0.82rem"></span>
+            </div>
 
             <label for="brands">Бренды</label>
             <p class="hint">Через запятую: Сбер, Альфастрахование, Добрый, Exeed</p>
@@ -386,6 +390,39 @@
         const cb = document.querySelector(`[data-et="${key}"]`);
         cb.checked = !cb.checked;
         document.getElementById(`et-${key}`).classList.toggle('checked', cb.checked);
+    }
+
+    async function checkApiKey() {
+        const key = document.getElementById('apiKey').value.trim();
+        const status = document.getElementById('keyStatus');
+        const btn = document.getElementById('checkKeyBtn');
+        if (!key) { status.textContent = ''; return; }
+
+        btn.disabled = true;
+        status.textContent = '...';
+        status.style.color = '#94a3b8';
+
+        try {
+            const resp = await fetch('/api/check-key', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ api_key: key }),
+            });
+            const data = await resp.json();
+            if (data.ok) {
+                status.textContent = 'OK';
+                status.style.color = '#22c55e';
+                localStorage.setItem('mistralApiKey', key);
+            } else {
+                status.textContent = 'Неверный ключ';
+                status.style.color = '#ef4444';
+            }
+        } catch {
+            status.textContent = 'Ошибка';
+            status.style.color = '#ef4444';
+        } finally {
+            btn.disabled = false;
+        }
     }
 
     function setAllET(val) {
