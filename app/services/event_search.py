@@ -90,11 +90,13 @@ SYSTEM_PROMPT = """\
 
 
 def _search_ddg(
-    brand: str, event_types: list[str], year_from: int, year_to: int
+    brand: str, event_types: list[str], year_from: int, year_to: int,
+    industry: str = "",
 ) -> list[dict]:
     """Search DuckDuckGo for selected event types."""
     all_results = []
     seen_urls = set()
+    industry_suffix = f" {industry}" if industry else ""
 
     queries = []
     for year in range(year_from, year_to + 1):
@@ -102,7 +104,7 @@ def _search_ddg(
             cfg = EVENT_TYPES.get(et)
             if not cfg:
                 continue
-            queries.append((cfg["query"].format(brand=brand, year=year), et))
+            queries.append((cfg["query"].format(brand=brand, year=year) + industry_suffix, et))
 
     with DDGS() as ddgs:
         for query, category in queries:
@@ -205,16 +207,17 @@ async def search_brand_events(
     year_from: int = 2022,
     year_to: int = 2025,
     api_key: str = "",
+    industry: str = "",
 ) -> BrandEventsResponse:
     if not event_types:
         event_types = list(EVENT_TYPES.keys())
 
     loop = asyncio.get_event_loop()
-    logger.info(f"Searching '{brand}' ({year_from}-{year_to}), types: {event_types}")
+    logger.info(f"Searching '{brand}' ({year_from}-{year_to}), industry='{industry}', types: {event_types}")
 
     # Step 1: DDG search
     search_results = await loop.run_in_executor(
-        None, partial(_search_ddg, brand, event_types, year_from, year_to)
+        None, partial(_search_ddg, brand, event_types, year_from, year_to, industry)
     )
 
     logger.info(f"Brand '{brand}': {len(search_results)} raw results")

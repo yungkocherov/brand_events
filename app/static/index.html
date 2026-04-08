@@ -312,6 +312,11 @@
             <p class="hint">Через запятую: Сбер, Альфастрахование, Добрый, Exeed</p>
             <textarea id="brands" placeholder="Сбер, Альфастрахование, Добрый"></textarea>
 
+            <label for="industry" style="margin-top:14px">Категория</label>
+            <p class="hint">Сфера деятельности брендов — помогает уточнить поиск и отсеять однофамильцев. Например: напитки, страхование, автомобили, банки</p>
+            <input type="text" id="industry" placeholder="напитки"
+                   style="width:100%;padding:10px 12px;border:1px solid #cbd5e1;border-radius:10px;font-size:0.9rem;font-family:inherit">
+
             <label style="margin-top:16px">Типы событий</label>
             <p class="hint">Выберите, какие события искать. Чем меньше — тем быстрее и точнее.</p>
             <div class="event-types-grid" id="eventTypesGrid"></div>
@@ -441,6 +446,7 @@
         if (!eventTypes.length) { alert('Выберите хотя бы один тип событий'); return; }
         const apiKey = document.getElementById('apiKey').value.trim();
         if (apiKey) localStorage.setItem('mistralApiKey', apiKey);
+        const industry = document.getElementById('industry').value.trim();
 
         const btn = document.getElementById('searchBtn');
         const loading = document.getElementById('loading');
@@ -454,7 +460,7 @@
         try {
             const resp = await fetch('/api/search', {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ brands, event_types: eventTypes, year_from: yearFrom, year_to: yearTo, api_key: apiKey }),
+                body: JSON.stringify({ brands, industry, event_types: eventTypes, year_from: yearFrom, year_to: yearTo, api_key: apiKey }),
             });
             if (!resp.ok) throw new Error(await resp.text());
             const data = await resp.json();

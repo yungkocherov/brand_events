@@ -27,7 +27,7 @@ async def get_event_types():
 @app.post("/api/search", response_model=SearchResponse)
 async def search_events(request: BrandRequest):
     tasks = [
-        search_brand_events(brand, request.event_types, request.year_from, request.year_to, request.api_key)
+        search_brand_events(brand, request.event_types, request.year_from, request.year_to, request.api_key, request.industry)
         for brand in request.brands
     ]
     results = await asyncio.gather(*tasks)
