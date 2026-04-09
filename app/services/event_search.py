@@ -240,16 +240,22 @@ async def search_brand_events(
     # Limit input to ~30 results to avoid overloading Mistral context
     mistral_input = search_results[:30]
     if api_key:
-        try:
-            ai_response = await loop.run_in_executor(
-                None, partial(_analyze_with_mistral, api_key, brand, mistral_input, industry, model)
-            )
-            events = _parse_events(ai_response, brand)
-            if not events:
-                logger.warning(f"Mistral returned 0 events for '{brand}', falling back to raw")
-                events = _raw_to_events(brand, search_results)
-        except Exception as e:
-            logger.error(f"Mistral failed for '{brand}': {e}")
+        events = []
+        for attempt in range(3):
+            try:
+                ai_response = await loop.run_in_executor(
+                    None, partial(_analyze_with_mistral, api_key, brand, mistral_input, industry, model)
+                )
+                events = _parse_events(ai_response, brand)
+                if events:
+                    break
+                logger.warning(f"Mistral returned 0 events for '{brand}', attempt {attempt + 1}/3")
+            except Exception as e:
+                logger.error(f"Mistral attempt {attempt + 1}/3 failed for '{brand}': {e}")
+            if attempt < 2:
+                await asyncio.sleep(2)
+        if not events:
+            logger.warning(f"All Mistral attempts failed for '{brand}', using raw results")
             events = _raw_to_events(brand, search_results)
     else:
         events = _raw_to_events(brand, search_results)
