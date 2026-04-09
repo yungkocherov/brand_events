@@ -91,6 +91,17 @@
         .loading-steps li.done { color: #22c55e; }
         .step-icon { width: 18px; text-align: center; font-size: 0.8rem; }
         .loading-hint { color: #94a3b8; font-size: 0.82rem; margin-top: 16px; }
+        .loading-brand {
+            display: flex; align-items: center; gap: 10px;
+            padding: 8px 14px; margin: 6px auto; max-width: 400px;
+            border-radius: 8px; font-size: 0.88rem; text-align: left;
+            background: #f1f5f9; border: 1px solid #e2e8f0;
+        }
+        .loading-brand.active { background: #eef2ff; border-color: #c7d2fe; color: #4338ca; font-weight: 500; }
+        .loading-brand.done { background: #f0fdf4; border-color: #bbf7d0; color: #166534; }
+        .loading-brand.error { background: #fef2f2; border-color: #fecaca; color: #991b1b; }
+        .loading-brand .lb-icon { width: 20px; text-align: center; }
+        .loading-brand .lb-detail { font-size: 0.78rem; color: #94a3b8; margin-left: auto; }
 
         /* Results */
         .results { display: none; }
@@ -368,14 +379,9 @@
                 <div class="loading-dot"></div>
                 <div class="loading-dot"></div>
             </div>
-            <p class="loading-title">Ищем события по брендам</p>
-            <ul class="loading-steps" id="loadingSteps">
-                <li class="active"><span class="step-icon">&#9679;</span> Поиск новостей по каждому бренду и году</li>
-                <li><span class="step-icon">&#9679;</span> Фильтрация дубликатов</li>
-                <li><span class="step-icon">&#9679;</span> AI-анализ и отбор значимых событий</li>
-                <li><span class="step-icon">&#9679;</span> Формирование результатов</li>
-            </ul>
-            <p class="loading-hint">Это может занять несколько минут, в зависимости от количества брендов и выбранного периода</p>
+            <p class="loading-title" id="loadingTitle">Ищем события по брендам</p>
+            <div id="loadingBrands"></div>
+            <p class="loading-hint">Каждый бренд: поиск новостей + AI-фильтрация. Чем меньше типов событий, тем быстрее.</p>
         </div>
         <div class="results" id="results"></div>
     </div>
@@ -481,23 +487,6 @@
     function getHistory() {
         try { return JSON.parse(localStorage.getItem('brandSearchHistory') || '[]'); } catch { return []; }
     }
-    let loadingInterval = null;
-    function startLoadingAnimation() {
-        let step = 0;
-        const steps = document.querySelectorAll('#loadingSteps li');
-        loadingInterval = setInterval(() => {
-            steps.forEach((s, i) => {
-                s.className = i < step ? 'done' : i === step ? 'active' : '';
-                s.querySelector('.step-icon').innerHTML = i < step ? '&#10003;' : '&#9679;';
-            });
-            step++;
-            if (step >= steps.length) step = steps.length - 1;
-        }, 5000);
-    }
-    function stopLoadingAnimation() {
-        if (loadingInterval) { clearInterval(loadingInterval); loadingInterval = null; }
-    }
-
     function saveToHistory(brands, yearFrom, yearTo) {
         let h = getHistory();
         const key = `${brands.join(', ')} (${yearFrom}-${yearTo})`;
@@ -577,31 +566,65 @@
         btn.disabled = true; loading.classList.add('active');
         results.classList.remove('active'); error.classList.remove('active');
         results.innerHTML = '';
-        startLoadingAnimation();
         document.getElementById('loading').scrollIntoView({ behavior: 'smooth', block: 'center' });
 
-        try {
-            const resp = await fetch('/api/search', {
-                method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ brands, industry, event_types: eventTypes, year_from: yearFrom, year_to: yearTo, api_key: apiKey, model }),
-            });
-            if (!resp.ok) throw new Error(await resp.text());
-            const data = await resp.json();
-            lastResults = data.results;
+        // Render brand progress list
+        const brandsDiv = document.getElementById('loadingBrands');
+        brandsDiv.innerHTML = brands.map(b =>
+            `<div class="loading-brand" id="lb-${toSnakeCase(b)}">
+                <span class="lb-icon">&#9679;</span>
+                <span>${esc(b)}</span>
+                <span class="lb-detail">ожидание</span>
+            </div>`
+        ).join('');
+
+        const allResults = [];
+        let hasError = false;
+
+        for (const brand of brands) {
+            const lbId = `lb-${toSnakeCase(brand)}`;
+            const lb = document.getElementById(lbId);
+
+            // Mark active
+            if (lb) { lb.className = 'loading-brand active'; lb.querySelector('.lb-detail').textContent = 'поиск...'; }
+
+            try {
+                const resp = await fetch('/api/search', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ brands: [brand], industry, event_types: eventTypes, year_from: yearFrom, year_to: yearTo, api_key: apiKey, model }),
+                });
+                if (!resp.ok) throw new Error(await resp.text());
+                const data = await resp.json();
+                const brandResult = data.results[0];
+                allResults.push(brandResult);
+
+                if (lb) {
+                    lb.className = 'loading-brand done';
+                    lb.querySelector('.lb-icon').innerHTML = '&#10003;';
+                    lb.querySelector('.lb-detail').textContent = `${brandResult.events.length} событий`;
+                }
+            } catch (e) {
+                if (lb) {
+                    lb.className = 'loading-brand error';
+                    lb.querySelector('.lb-icon').innerHTML = '&#10007;';
+                    lb.querySelector('.lb-detail').textContent = 'ошибка';
+                }
+                allResults.push({ brand, events: [] });
+            }
+        }
+
+        if (allResults.length) {
+            lastResults = allResults;
             activeTab = 0; excluded = new Set();
-            // Init filters from actual event categories in results
             const allCats = new Set();
-            data.results.forEach(b => b.events.forEach(e => allCats.add(e.impact_category || 'other')));
+            allResults.forEach(b => b.events.forEach(e => allCats.add(e.impact_category || 'other')));
             filters.categories = allCats;
             sortBy = 'date';
             saveToHistory(brands, yearFrom, yearTo);
-            renderResults(data.results);
-        } catch (e) {
-            error.textContent = e.message; error.classList.add('active');
-        } finally {
-            btn.disabled = false; loading.classList.remove('active');
-            stopLoadingAnimation();
+            renderResults(allResults);
         }
+
+        btn.disabled = false; loading.classList.remove('active');
     }
 
     // --- Render ---
