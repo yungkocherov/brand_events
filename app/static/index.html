@@ -32,7 +32,7 @@
             padding: 24px; margin-bottom: 24px; box-shadow: 0 1px 3px rgba(0,0,0,0.04);
         }
         label { display: block; font-weight: 600; margin-bottom: 5px; font-size: 0.88rem; color: #334155; }
-        .hint { font-size: 0.8rem; color: #94a3b8; margin-bottom: 8px; }
+        .hint { font-size: 0.8rem; color: #c5cdd8; margin-bottom: 8px; }
         textarea {
             width: 100%; padding: 10px 12px; border: 1px solid #cbd5e1; border-radius: 10px;
             font-size: 0.95rem; resize: none; min-height: 48px; font-family: inherit;
@@ -341,9 +341,9 @@
                 <input type="password" id="apiKey" placeholder="Вставьте API-ключ"
                        style="flex:1;padding:10px 12px;border:1px solid #cbd5e1;border-radius:10px;font-size:0.9rem;font-family:inherit">
                 <select id="modelSelect" style="padding:10px 12px;border:1px solid #cbd5e1;border-radius:10px;font-size:0.85rem;font-family:inherit">
-                    <option value="open-mistral-nemo">Nemo (быстрая)</option>
-                    <option value="mistral-small-latest">Small (точная)</option>
                     <option value="mistral-medium-latest">Medium (лучшая)</option>
+                    <option value="mistral-small-latest">Small (точная)</option>
+                    <option value="open-mistral-nemo">Nemo (быстрая)</option>
                 </select>
                 <button class="btn btn-outline btn-sm" onclick="checkApiKey()" id="checkKeyBtn">Проверить</button>
                 <span id="keyStatus" style="font-size:0.82rem"></span>
