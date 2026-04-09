@@ -469,9 +469,10 @@
                 else status.textContent = 'Ошибка';
                 status.style.color = '#ef4444';
             }
-        } catch {
-            status.textContent = 'Ошибка';
+        } catch (e) {
+            status.textContent = 'Ошибка сети';
             status.style.color = '#ef4444';
+            console.error('check-key error:', e);
         } finally {
             btn.disabled = false;
         }

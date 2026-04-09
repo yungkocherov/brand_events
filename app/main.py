@@ -34,14 +34,19 @@ class CheckKeyRequest(BaseModel):
 @app.post("/api/check-key")
 async def check_key(request: CheckKeyRequest):
     from mistralai.client import Mistral
+    loop = asyncio.get_event_loop()
     try:
-        client = Mistral(api_key=request.api_key)
-        client.chat.complete(
-            model=request.model,
-            messages=[{"role": "user", "content": "hi"}],
-            max_tokens=1,
-        )
+        def _check():
+            client = Mistral(api_key=request.api_key, timeout_ms=10000)
+            client.chat.complete(
+                model=request.model,
+                messages=[{"role": "user", "content": "hi"}],
+                max_tokens=1,
+            )
+        await asyncio.wait_for(loop.run_in_executor(None, _check), timeout=15)
         return {"ok": True}
+    except asyncio.TimeoutError:
+        return {"ok": False, "error": "Timeout — Mistral не отвечает"}
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
