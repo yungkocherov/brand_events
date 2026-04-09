@@ -328,6 +328,11 @@
             <div style="display:flex;gap:8px;align-items:center;margin-bottom:4px">
                 <input type="password" id="apiKey" placeholder="Вставьте API-ключ"
                        style="flex:1;padding:10px 12px;border:1px solid #cbd5e1;border-radius:10px;font-size:0.9rem;font-family:inherit">
+                <select id="modelSelect" style="padding:10px 12px;border:1px solid #cbd5e1;border-radius:10px;font-size:0.85rem;font-family:inherit">
+                    <option value="open-mistral-nemo">Nemo (быстрая)</option>
+                    <option value="mistral-small-latest">Small (точная)</option>
+                    <option value="mistral-medium-latest">Medium (лучшая)</option>
+                </select>
                 <button class="btn btn-outline btn-sm" onclick="checkApiKey()" id="checkKeyBtn">Проверить</button>
                 <span id="keyStatus" style="font-size:0.82rem"></span>
             </div>
@@ -442,7 +447,7 @@
             const resp = await fetch('/api/check-key', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ api_key: key }),
+                body: JSON.stringify({ api_key: key, model: document.getElementById('modelSelect').value }),
             });
             const data = await resp.json();
             if (data.ok) {
@@ -541,6 +546,7 @@
         let hasError = false;
 
         const apiKey = document.getElementById('apiKey').value.trim();
+        const model = document.getElementById('modelSelect').value;
         if (!apiKey) { showFieldError('apiKey', 'apiKeyError'); hasError = true; }
         else { localStorage.setItem('mistralApiKey', apiKey); }
 
@@ -576,7 +582,7 @@
         try {
             const resp = await fetch('/api/search', {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ brands, industry, event_types: eventTypes, year_from: yearFrom, year_to: yearTo, api_key: apiKey }),
+                body: JSON.stringify({ brands, industry, event_types: eventTypes, year_from: yearFrom, year_to: yearTo, api_key: apiKey, model }),
             });
             if (!resp.ok) throw new Error(await resp.text());
             const data = await resp.json();

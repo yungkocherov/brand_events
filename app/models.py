@@ -9,6 +9,7 @@ class BrandRequest(BaseModel):
     year_from: int = 2022
     year_to: int = 2025
     api_key: str = ""
+    model: str = "open-mistral-nemo"
 
 
 class BrandEvent(BaseModel):

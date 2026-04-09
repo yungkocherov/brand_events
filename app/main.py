@@ -28,6 +28,7 @@ async def get_event_types():
 
 class CheckKeyRequest(BaseModel):
     api_key: str
+    model: str = "open-mistral-nemo"
 
 
 @app.post("/api/check-key")
@@ -36,7 +37,7 @@ async def check_key(request: CheckKeyRequest):
     try:
         client = Mistral(api_key=request.api_key)
         client.chat.complete(
-            model="mistral-small-latest",
+            model=request.model,
             messages=[{"role": "user", "content": "hi"}],
             max_tokens=1,
         )
@@ -48,7 +49,7 @@ async def check_key(request: CheckKeyRequest):
 @app.post("/api/search", response_model=SearchResponse)
 async def search_events(request: BrandRequest):
     tasks = [
-        search_brand_events(brand, request.event_types, request.year_from, request.year_to, request.api_key, request.industry)
+        search_brand_events(brand, request.event_types, request.year_from, request.year_to, request.api_key, request.industry, request.model)
         for brand in request.brands
     ]
     results = await asyncio.gather(*tasks)

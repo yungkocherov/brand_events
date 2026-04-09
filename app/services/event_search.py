@@ -143,7 +143,8 @@ def _search_ddg(
 
 
 def _analyze_with_mistral(
-    api_key: str, brand: str, search_results: list[dict], industry: str = ""
+    api_key: str, brand: str, search_results: list[dict],
+    industry: str = "", model: str = "open-mistral-nemo",
 ) -> str:
     """Use Mistral to filter and structure search results."""
     client = Mistral(api_key=api_key)
@@ -162,7 +163,7 @@ def _analyze_with_mistral(
     prompt = SYSTEM_PROMPT.format(brand=brand, industry_note=industry_note)
 
     response = client.chat.complete(
-        model="mistral-small-latest",
+        model=model,
         messages=[
             {"role": "system", "content": prompt},
             {"role": "user", "content": search_text},
@@ -220,6 +221,7 @@ async def search_brand_events(
     year_to: int = 2025,
     api_key: str = "",
     industry: str = "",
+    model: str = "open-mistral-nemo",
 ) -> BrandEventsResponse:
     if not event_types:
         event_types = list(EVENT_TYPES.keys())
@@ -242,7 +244,7 @@ async def search_brand_events(
     if api_key:
         try:
             ai_response = await loop.run_in_executor(
-                None, partial(_analyze_with_mistral, api_key, brand, mistral_input, industry)
+                None, partial(_analyze_with_mistral, api_key, brand, mistral_input, industry, model)
             )
             events = _parse_events(ai_response, brand)
         except Exception as e:
