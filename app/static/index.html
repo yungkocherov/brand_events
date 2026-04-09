@@ -364,6 +364,11 @@
             <label style="margin-top:16px">Типы событий</label>
             <p class="hint">Выберите, какие события искать. Чем меньше — тем быстрее и точнее.</p>
             <div class="event-types-grid" id="eventTypesGrid" style="border-radius:10px;padding:2px"></div>
+            <div style="margin-top:8px;display:flex;gap:8px;align-items:center">
+                <input type="text" id="customEventType" placeholder="Свой тип: например, отзыв лицензии"
+                       style="flex:1;padding:8px 12px;border:1px solid #cbd5e1;border-radius:10px;font-size:0.88rem;font-family:inherit">
+                <button class="btn btn-outline btn-sm" onclick="addCustomET()">Добавить</button>
+            </div>
             <p class="field-error-text" id="eventTypesError">Выберите хотя бы один тип</p>
 
             <div class="controls-row">
@@ -490,6 +495,40 @@
         return [...document.querySelectorAll('[data-et]:checked')].map(cb => cb.dataset.et);
     }
 
+    let customQueries = [];
+
+    function addCustomET() {
+        const input = document.getElementById('customEventType');
+        const val = input.value.trim();
+        if (!val) return;
+        customQueries.push(val);
+        input.value = '';
+        renderCustomQueries();
+    }
+
+    function removeCustomET(idx) {
+        customQueries.splice(idx, 1);
+        renderCustomQueries();
+    }
+
+    function renderCustomQueries() {
+        let wrap = document.getElementById('customQueriesList');
+        if (!wrap) {
+            wrap = document.createElement('div');
+            wrap.id = 'customQueriesList';
+            wrap.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap;margin-top:6px';
+            document.getElementById('customEventType').parentElement.after(wrap);
+        }
+        wrap.innerHTML = customQueries.map((q, i) =>
+            `<span style="display:inline-flex;align-items:center;gap:4px;padding:4px 10px;background:#eef2ff;border:1px solid #c7d2fe;border-radius:6px;font-size:0.82rem;color:#4338ca">
+                ${esc(q)}
+                <span style="cursor:pointer;color:#94a3b8;font-weight:700" onclick="removeCustomET(${i})">x</span>
+            </span>`
+        ).join('');
+    }
+
+    function getCustomQueries() { return [...customQueries]; }
+
     // --- History ---
     function getHistory() {
         try { return JSON.parse(localStorage.getItem('brandSearchHistory') || '[]'); } catch { return []; }
@@ -553,7 +592,8 @@
         if (!industry) { showFieldError('industry', 'industryError'); hasError = true; }
 
         const eventTypes = getSelectedET();
-        if (!eventTypes.length) {
+        const customQ = getCustomQueries();
+        if (!eventTypes.length && !customQ.length) {
             document.getElementById('eventTypesGrid').style.outline = '2px solid #ef4444';
             document.getElementById('eventTypesError').classList.add('visible');
             hasError = true;
@@ -593,7 +633,7 @@
             try {
                 const resp = await fetch('/api/search', {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ brands: [brand], industry, event_types: eventTypes, api_key: apiKey, model }),
+                    body: JSON.stringify({ brands: [brand], industry, event_types: eventTypes, custom_queries: customQ, api_key: apiKey, model }),
                 });
                 if (!resp.ok) throw new Error(await resp.text());
                 const data = await resp.json();

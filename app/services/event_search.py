@@ -83,7 +83,7 @@ SYSTEM_PROMPT = """\
 - event_name: краткое название события
 - event_date: дата в формате YYYY-MM-DD (если неизвестна — YYYY-MM-01)
 - description: 1-2 предложения
-- impact_category: СТРОГО одно из: market_exit, rebrand, new_product, supply, ad_campaign, scandal, sanctions, price_change, management, merger, pharma_registration, pharma_clinical, pharma_safety
+- impact_category: СТРОГО одно из: market_exit, rebrand, new_product, supply, ad_campaign, scandal, sanctions, price_change, management, merger, pharma_registration, pharma_clinical, pharma_safety, custom
 - sentiment: СТРОГО одно из: positive, negative, neutral
 - source_url: URL из результатов поиска
 - source_title: домен источника
@@ -106,18 +106,24 @@ SYSTEM_PROMPT = """\
 
 def _search_ddg(
     brand: str, event_types: list[str], industry: str = "",
+    custom_queries: list[str] | None = None,
 ) -> list[dict]:
-    """Search DuckDuckGo with one query per event type."""
+    """Search DuckDuckGo with one query per event type + custom queries."""
     all_results = []
     seen_urls = set()
     industry_suffix = f" {industry}" if industry else ""
 
+    # Build query list: standard types + custom
+    queries = []
+    for et in event_types:
+        cfg = EVENT_TYPES.get(et)
+        if cfg:
+            queries.append((f'"{brand}" {cfg["keywords"]}{industry_suffix}', et))
+    for cq in (custom_queries or []):
+        queries.append((f'"{brand}" {cq}{industry_suffix}', "custom"))
+
     with DDGS() as ddgs:
-        for et in event_types:
-            cfg = EVENT_TYPES.get(et)
-            if not cfg:
-                continue
-            query = f'"{brand}" {cfg["keywords"]}{industry_suffix}'
+        for query, category in queries:
             try:
                 results = list(ddgs.text(query, max_results=10, region="ru-ru"))
             except Exception as e:
@@ -133,7 +139,7 @@ def _search_ddg(
                     "title": r.get("title", "").strip(),
                     "href": url,
                     "body": r.get("body", "").strip(),
-                    "category": et,
+                    "category": category,
                 })
 
             logger.info(f"DDG: {len(results)} results for '{brand}' [{et}]")
@@ -217,6 +223,7 @@ def _parse_events(text: str, brand: str) -> list[BrandEvent]:
 async def search_brand_events(
     brand: str,
     event_types: list[str] | None = None,
+    custom_queries: list[str] | None = None,
     api_key: str = "",
     industry: str = "",
     model: str = "open-mistral-nemo",
@@ -229,7 +236,7 @@ async def search_brand_events(
 
     # Step 1: DDG search
     search_results = await loop.run_in_executor(
-        None, partial(_search_ddg, brand, event_types, industry)
+        None, partial(_search_ddg, brand, event_types, industry, custom_queries or [])
     )
 
     logger.info(f"Brand '{brand}': {len(search_results)} raw results")

@@ -54,7 +54,7 @@ async def check_key(request: CheckKeyRequest):
 @app.post("/api/search", response_model=SearchResponse)
 async def search_events(request: BrandRequest):
     tasks = [
-        search_brand_events(brand, request.event_types, request.api_key, request.industry, request.model)
+        search_brand_events(brand, request.event_types, request.custom_queries, request.api_key, request.industry, request.model)
         for brand in request.brands
     ]
     results = await asyncio.gather(*tasks)
