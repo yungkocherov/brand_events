@@ -640,7 +640,6 @@
         btn.disabled = true; loading.classList.add('active');
         results.classList.remove('active'); error.classList.remove('active');
         results.innerHTML = '';
-        window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
 
         // Render brand progress list
         const brandsDiv = document.getElementById('loadingBrands');
@@ -651,6 +650,11 @@
                 <span class="lb-detail">ожидание</span>
             </div>`
         ).join('');
+
+        // Scroll to bottom after loading block is fully rendered
+        requestAnimationFrame(() => {
+            window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+        });
 
         const allResults = [];
 
