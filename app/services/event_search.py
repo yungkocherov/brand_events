@@ -358,7 +358,7 @@ def _domain(url: str) -> str:
 async def _fetch_article_date(client: httpx.AsyncClient, url: str) -> str:
     """Fetch article HTML and extract publication date."""
     try:
-        resp = await client.get(url, timeout=5, follow_redirects=True,
+        resp = await client.get(url, timeout=3, follow_redirects=True,
                                 headers={"User-Agent": "Mozilla/5.0"})
         if resp.status_code != 200:
             return ""
