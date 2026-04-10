@@ -7,8 +7,9 @@
 - Параллельный поиск событий по списку брендов
 - 11 категорий событий: уход с рынка, ребрендинг, новый продукт, перебои поставок, рекламная кампания, скандал, санкции, изменение цен, смена руководства, слияние, прочее
 - Фильтр по отрасли — отсеивает однофамильцев из других сфер
-- AI-фильтрация через Mistral (бесплатный API), фоллбэк на сырые результаты при сбое
-- Извлечение даты публикации из URL и `<head>` страницы
+- **Выбор AI-провайдера**: Mistral, OpenAI, Anthropic Claude, Google Gemini. Ключ хранится в браузере отдельно для каждого провайдера
+- Фоллбэк на сырые результаты при сбое AI
+- Извлечение даты публикации из URL, JSON-LD, meta-тегов, `<time>`, og:title и доменных правил
 - Оценка влияния события на метрики (1-5 звёзд)
 - Тональность (позитивное / негативное / нейтральное)
 - Таймлайн событий с цветами по категории
@@ -22,14 +23,14 @@
 
 ### Требования
 - Python 3.10+
-- Доступ к Mistral API (через VPN из РФ)
+- API-ключ от одного из поддерживаемых провайдеров (из России для Mistral/OpenAI/Anthropic может потребоваться VPN)
 
 ### Шаги
 
 1. Клонировать репозиторий:
 ```bash
-git clone https://github.com/yungkocherov/brand_events.git
-cd brand_events
+git clone https://github.com/yungkocherov/Brand-Events-Finder.git
+cd Brand-Events-Finder
 ```
 
 2. Запустить сервис:
@@ -50,13 +51,28 @@ uvicorn app.main:app --host 0.0.0.0 --port 8080
 ## Использование
 
 1. Открой http://localhost:8080
-2. Получи бесплатный API-ключ на https://console.mistral.ai (регистрация занимает минуту)
-3. Вставь ключ в поле "Mistral API Key" и нажми "Проверить"
+2. Выбери AI-провайдера в селекте и получи ключ по ссылке «получить ключ» рядом с полем:
+   - [console.mistral.ai](https://console.mistral.ai) — Mistral (есть бесплатный план)
+   - [platform.openai.com/api-keys](https://platform.openai.com/api-keys) — OpenAI
+   - [console.anthropic.com](https://console.anthropic.com/settings/keys) — Anthropic Claude
+   - [aistudio.google.com/apikey](https://aistudio.google.com/apikey) — Google Gemini (есть бесплатный план)
+3. Вставь ключ в поле «API-ключ», выбери модель и нажми «Проверить»
 4. Введи бренды через запятую: `Нурофен, Терафлю, Спазмалгон`
 5. Укажи отрасль: `фармацевтика`
-6. Нажми "Найти события" — все бренды обрабатываются параллельно
+6. Нажми «Найти события» — все бренды обрабатываются параллельно
 7. Просмотри результаты, отметь нужные события чекбоксами
 8. Скачай CSV для использования в моделях
+
+### Поддерживаемые модели
+
+| Провайдер | Модели |
+|---|---|
+| **Mistral** | `mistral-medium-latest`, `mistral-small-latest`, `open-mistral-nemo` |
+| **OpenAI** | `gpt-4o`, `gpt-4o-mini`, `gpt-4.1-mini` |
+| **Anthropic** | `claude-sonnet-4-6`, `claude-haiku-4-5` |
+| **Google** | `gemini-2.5-pro`, `gemini-2.5-flash` |
+
+Для каждого провайдера первая модель в списке — рекомендуемая по качеству; последняя — самая быстрая/дешёвая.
 
 ### CSV формат
 
@@ -76,46 +92,66 @@ date,nurofen__povyshenie_cen,teraflyu__zapusk_novoy_lineyki
 
 ```
 app/
-├── main.py              FastAPI: эндпоинты /api/search, /api/csv, /api/check-key
-├── models.py            Pydantic-модели запросов и ответов
+├── main.py                  FastAPI: /api/search, /api/csv, /api/check-key, /api/providers
+├── models.py                Pydantic-модели запросов и ответов
 ├── services/
-│   └── event_search.py  Логика поиска: DDG + Mistral
+│   ├── event_search.py      Логика поиска: DDG + извлечение дат + LLM-фильтрация
+│   └── llm.py               Абстракция LLM: Mistral / OpenAI / Anthropic / Google
 └── static/
-    └── index.html       Single-page фронтенд (vanilla JS)
+    └── index.html           Single-page фронтенд (vanilla JS)
+
+tests/                       pytest-сьют, 101 тест
 ```
 
 ### Поток данных
 
-1. **Frontend** → POST `/api/search` со списком брендов и параметрами (один запрос на все бренды)
+1. **Frontend** → POST `/api/search` со списком брендов, провайдером, моделью и ключом (один запрос на все бренды)
 2. **Backend** запускает поиск по брендам параллельно через `asyncio.gather`
 3. **DuckDuckGo Search** — 5 широких запросов на бренд (`max_results=25` каждый), фильтр по списку доверенных доменов (общие + специфичные для отрасли)
 4. **Дедупликация** по URL
-5. **Обогащение датами публикации** — параллельный fetch HTML, парсинг URL → JSON-LD → meta-тегов → `<time>`
-6. **Mistral AI** — фильтрует мусор, оставляет реальные события про бренд, оценивает impact_score 1-5, sentiment, категорию
-7. **3 попытки** при сбое Mistral, фоллбэк на сырые результаты с категорией `other`
+5. **Обогащение датами публикации** — параллельный fetch HTML, извлечение даты в порядке: URL → доменные правила → JSON-LD (`@type=Article`) → meta-теги → `<time>` → og:title → текстовые маркеры
+6. **AI-фильтрация** через выбранного провайдера (`app/services/llm.py`): общий интерфейс `complete()` диспетчеризует запрос в соответствующий endpoint. Модель оценивает `impact_score`, `sentiment`, категорию
+7. **3 попытки** при сбое LLM, фоллбэк на сырые результаты с категорией `other`
 8. **Сортировка** по impact_score (по убыванию), затем по дате
 9. **Frontend** → отображает с фильтрами по категории и сортировкой
 
+### Добавление нового LLM-провайдера
+
+Вся вендор-специфичная логика живёт в [app/services/llm.py](app/services/llm.py). Чтобы добавить нового провайдера:
+
+1. Добавить запись в `PROVIDERS` с `label`, списком `models`, ссылкой `get_key_url` и опциональной `note`
+2. Добавить ветку в `complete()` и реализовать `_myprovider()` по образцу `_anthropic()` / `_google()`
+3. Фронтенд автоматически подхватит нового провайдера через `/api/providers` — изменений в HTML/JS не нужно
+
 ## Безопасность
 
-- API-ключ Mistral хранится **только в браузере** (localStorage)
+- API-ключи хранятся **только в браузере** (localStorage), отдельно для каждого провайдера
 - Бэкенд получает ключ из тела запроса и не сохраняет
 - Никаких ключей в `.env` на сервере
 - Сервис работает локально, не требует VPS
 
 ## Ограничения
 
-- DuckDuckGo может блокировать при частых запросах — добавлены паузы 0.5 сек
-- Mistral API недоступен из РФ без VPN
-- Бесплатный tier Mistral: 500 000 токенов/день
-- Точность зависит от качества промпта и качества выдачи DDG
+- DuckDuckGo может блокировать при частых запросах — добавлены паузы 0.5 сек между запросами
+- Mistral, OpenAI, Anthropic недоступны из РФ без VPN; Gemini обычно доступен
+- У Mistral и Gemini есть бесплатные планы (сотни тысяч токенов/день) — обычно достаточно для фильтрации десятков брендов
+- Точность зависит от качества промпта, модели и выдачи DDG
+
+## Тесты
+
+```bash
+pytest
+```
+
+101 тест покрывает: извлечение дат (доменные правила, окно статьи, JSON-LD, og:title), парсер ответов LLM, trusted-domain фильтр, транслитерация snake_case, CSV endpoint, все четыре LLM-провайдера с мок-клиентом.
 
 ## Стек
 
 - **Backend**: FastAPI, Pydantic, httpx
 - **Search**: ddgs (DuckDuckGo)
-- **AI**: mistralai
+- **LLM**: raw httpx-запросы к Mistral / OpenAI / Anthropic / Google — без вендорских SDK
 - **Frontend**: HTML + vanilla JavaScript (без фреймворков)
+- **Tests**: pytest, pytest-asyncio
 
 ## Лицензия
 

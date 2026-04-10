@@ -83,6 +83,11 @@
         }
         .api-strip-hint a { color: #4338ca; text-decoration: none; }
         .api-strip-hint a:hover { text-decoration: underline; }
+        .api-strip-note {
+            font-size: 0.74rem; color: #94a3b8; margin-top: 6px;
+            min-height: 1em;
+        }
+        .api-strip-note:empty { display: none; }
         .api-input-row {
             display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
         }
@@ -417,9 +422,9 @@
         <details class="about-toggle">
             <summary>Как это работает</summary>
             <div class="about-body">
-                <p>Сервис ищет в доверенных новостных источниках события, которые могли повлиять на выручку, узнаваемость, репутацию и операционную деятельность брендов. AI-агент Mistral фильтрует выдачу, оценивает влияние (1–5) и тональность каждого события, а затем результаты можно выгрузить в CSV для использования в моделях.</p>
-                <p>Нужен бесплатный API-ключ Mistral — получите за минуту на <a href="https://console.mistral.ai" target="_blank">console.mistral.ai</a>. Ключ хранится только в вашем браузере.</p>
-                <p class="vpn-note">Для работы с Mistral API из России может потребоваться VPN.</p>
+                <p>Сервис ищет в доверенных новостных источниках события, которые могли повлиять на выручку, узнаваемость, репутацию и операционную деятельность брендов. AI-агент фильтрует выдачу, оценивает влияние (1–5) и тональность каждого события, а затем результаты можно выгрузить в CSV для использования в моделях.</p>
+                <p>На выбор доступны <strong>Mistral</strong>, <strong>OpenAI</strong>, <strong>Anthropic Claude</strong> и <strong>Google Gemini</strong> — используйте того провайдера, от которого у вас уже есть ключ. У Mistral и Gemini есть бесплатные планы, которых обычно хватает для фильтрации десятков брендов в день. Ключ хранится только в вашем браузере, отдельно для каждого провайдера.</p>
+                <p class="vpn-note">Для работы с Mistral, OpenAI и Anthropic из России может потребоваться VPN.</p>
             </div>
         </details>
 
@@ -434,20 +439,18 @@
         <div class="input-section">
             <div class="api-strip">
                 <div class="api-strip-head">
-                    <span class="api-strip-title">Mistral API Key</span>
-                    <span class="api-strip-hint">Хранится только в браузере · <a href="https://console.mistral.ai" target="_blank">получить ключ</a></span>
+                    <span class="api-strip-title">AI Provider</span>
+                    <span class="api-strip-hint">Хранится только в браузере · <a id="getKeyLink" href="https://console.mistral.ai" target="_blank">получить ключ</a></span>
                 </div>
                 <div class="api-input-row">
+                    <select id="providerSelect" title="Провайдер" onchange="onProviderChange()"></select>
+                    <select id="modelSelect" title="Модель"></select>
                     <input type="password" id="apiKey" placeholder="Вставьте API-ключ">
-                    <select id="modelSelect" title="Модель Mistral">
-                        <option value="mistral-medium-latest">Medium (лучшая)</option>
-                        <option value="mistral-small-latest">Small (точная)</option>
-                        <option value="open-mistral-nemo">Nemo (быстрая)</option>
-                    </select>
                     <button class="btn btn-outline btn-sm" onclick="checkApiKey()" id="checkKeyBtn">Проверить</button>
                     <span id="keyStatus" style="font-size:0.82rem"></span>
                 </div>
-                <p class="field-error-text" id="apiKeyError" style="margin-top:6px">Введите API-ключ Mistral</p>
+                <p class="api-strip-note" id="providerNote"></p>
+                <p class="field-error-text" id="apiKeyError" style="margin-top:6px">Введите API-ключ</p>
             </div>
 
             <div class="form-body">
@@ -512,15 +515,64 @@
         return CATEGORY_LABELS[key] || key || 'Другое';
     }
 
+    // --- Providers ---
+    let PROVIDERS = {};
+    const apiKeyStorageKey = (provider) => `llmApiKey::${provider}`;
+
+    async function loadProviders() {
+        try {
+            const resp = await fetch('/api/providers');
+            const data = await resp.json();
+            PROVIDERS = data.providers || {};
+            const providerSel = document.getElementById('providerSelect');
+            const savedProvider = localStorage.getItem('llmProvider') || data.default || 'mistral';
+            providerSel.innerHTML = Object.entries(PROVIDERS)
+                .map(([id, cfg]) => `<option value="${id}"${id===savedProvider?' selected':''}>${esc(cfg.label)}</option>`)
+                .join('');
+            onProviderChange();
+        } catch (e) {
+            console.error('Failed to load providers:', e);
+        }
+    }
+
+    function onProviderChange() {
+        const providerSel = document.getElementById('providerSelect');
+        const provider = providerSel.value;
+        const cfg = PROVIDERS[provider];
+        if (!cfg) return;
+        localStorage.setItem('llmProvider', provider);
+
+        // Rebuild model dropdown
+        const modelSel = document.getElementById('modelSelect');
+        const savedModel = localStorage.getItem(`llmModel::${provider}`) || cfg.models[0]?.id;
+        modelSel.innerHTML = cfg.models.map(m =>
+            `<option value="${esc(m.id)}"${m.id===savedModel?' selected':''}>${esc(m.label)}</option>`
+        ).join('');
+        modelSel.onchange = () => localStorage.setItem(`llmModel::${provider}`, modelSel.value);
+
+        // Update "get key" link
+        document.getElementById('getKeyLink').href = cfg.get_key_url;
+
+        // Provider-specific note (e.g. "Из России может потребоваться VPN")
+        document.getElementById('providerNote').textContent = cfg.note || '';
+
+        // Restore the API key saved for this provider (keys per provider)
+        document.getElementById('apiKey').value = localStorage.getItem(apiKeyStorageKey(provider)) || '';
+
+        // Reset status indicator
+        document.getElementById('keyStatus').textContent = '';
+    }
+
     // --- Init ---
     (function init() {
         renderHistory();
-        const savedKey = localStorage.getItem('mistralApiKey') || '';
-        document.getElementById('apiKey').value = savedKey;
+        loadProviders();
     })();
 
     async function checkApiKey() {
         const key = document.getElementById('apiKey').value.trim();
+        const provider = document.getElementById('providerSelect').value;
+        const model = document.getElementById('modelSelect').value;
         const status = document.getElementById('keyStatus');
         const btn = document.getElementById('checkKeyBtn');
 
@@ -539,20 +591,21 @@
             const resp = await fetch('/api/check-key', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ api_key: key, model: document.getElementById('modelSelect').value }),
+                body: JSON.stringify({ api_key: key, provider, model }),
             });
             const data = await resp.json();
             if (data.ok) {
                 status.textContent = 'OK';
                 status.style.color = '#22c55e';
-                localStorage.setItem('mistralApiKey', key);
+                localStorage.setItem(apiKeyStorageKey(provider), key);
             } else {
                 const err = data.error || '';
-                if (err.includes('401')) status.textContent = 'Неверный ключ';
+                if (err.includes('401') || /invalid|unauthor/i.test(err)) status.textContent = 'Неверный ключ';
                 else if (err.includes('429')) status.textContent = 'Лимит — подождите';
-                else if (err.includes('503')) status.textContent = 'Mistral недоступен';
+                else if (err.includes('503')) status.textContent = 'Провайдер недоступен';
                 else status.textContent = 'Ошибка';
                 status.style.color = '#ef4444';
+                status.title = err;
             }
         } catch (e) {
             status.textContent = 'Ошибка сети';
@@ -618,9 +671,10 @@
         let hasError = false;
 
         const apiKey = document.getElementById('apiKey').value.trim();
+        const provider = document.getElementById('providerSelect').value;
         const model = document.getElementById('modelSelect').value;
         if (!apiKey) { showFieldError('apiKey', 'apiKeyError'); hasError = true; }
-        else { localStorage.setItem('mistralApiKey', apiKey); }
+        else { localStorage.setItem(apiKeyStorageKey(provider), apiKey); }
 
         const input = document.getElementById('brands').value.trim();
         const brands = input ? input.split(',').map(b => b.trim()).filter(Boolean) : [];
@@ -665,7 +719,7 @@
         try {
             const resp = await fetch('/api/search', {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ brands, industry, api_key: apiKey, model }),
+                body: JSON.stringify({ brands, industry, api_key: apiKey, provider, model }),
             });
             if (!resp.ok) throw new Error(await resp.text());
             const data = await resp.json();

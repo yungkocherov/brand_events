@@ -6,7 +6,14 @@ class BrandRequest(BaseModel):
     brands: list[str]
     industry: str = ""
     api_key: str = ""
-    model: str = "open-mistral-nemo"
+    provider: str = "mistral"
+    model: str = ""
+
+
+class CheckKeyRequest(BaseModel):
+    api_key: str
+    provider: str = "mistral"
+    model: str = ""
 
 
 class BrandEvent(BaseModel):

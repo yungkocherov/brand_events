@@ -9,10 +9,9 @@ from fastapi import FastAPI, Response
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from pydantic import BaseModel
-
-from app.models import BrandRequest, SearchResponse, CsvRequest
+from app.models import BrandRequest, SearchResponse, CsvRequest, CheckKeyRequest
 from app.services.event_search import search_brand_events
+from app.services.llm import PROVIDERS, check_key as llm_check_key, default_model_for
 
 logging.basicConfig(
     level=logging.INFO,
@@ -28,35 +27,28 @@ async def index():
     return FileResponse("app/static/index.html")
 
 
-class CheckKeyRequest(BaseModel):
-    api_key: str
-    model: str = "open-mistral-nemo"
+@app.get("/api/providers")
+async def list_providers():
+    """Return the LLM provider registry for the frontend to build dropdowns."""
+    return {"providers": PROVIDERS, "default": "mistral"}
 
 
 @app.post("/api/check-key")
 async def check_key(request: CheckKeyRequest):
-    from mistralai.client import Mistral
-    loop = asyncio.get_event_loop()
-    try:
-        def _check():
-            client = Mistral(api_key=request.api_key, timeout_ms=10000)
-            client.chat.complete(
-                model=request.model,
-                messages=[{"role": "user", "content": "hi"}],
-                max_tokens=1,
-            )
-        await asyncio.wait_for(loop.run_in_executor(None, _check), timeout=15)
-        return {"ok": True}
-    except asyncio.TimeoutError:
-        return {"ok": False, "error": "Timeout — Mistral не отвечает"}
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
+    model = request.model or default_model_for(request.provider)
+    if not model:
+        return {"ok": False, "error": f"Неизвестный провайдер: {request.provider}"}
+    ok, error = await llm_check_key(request.provider, request.api_key, model)
+    return {"ok": ok, "error": error} if not ok else {"ok": True}
 
 
 @app.post("/api/search", response_model=SearchResponse)
 async def search_events(request: BrandRequest):
+    model = request.model or default_model_for(request.provider)
     tasks = [
-        search_brand_events(brand, request.api_key, request.industry, request.model)
+        search_brand_events(
+            brand, request.api_key, request.industry, model, request.provider,
+        )
         for brand in request.brands
     ]
     results = await asyncio.gather(*tasks)

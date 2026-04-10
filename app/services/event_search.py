@@ -7,9 +7,9 @@ from functools import partial
 
 import httpx
 from ddgs import DDGS
-from mistralai.client import Mistral
 
 from app.models import BrandEvent, BrandEventsResponse
+from app.services.llm import complete as llm_complete
 
 logger = logging.getLogger(__name__)
 
@@ -203,13 +203,11 @@ def _search_ddg(brand: str, industry: str = "") -> list[dict]:
     return all_results
 
 
-def _analyze_with_mistral(
-    api_key: str, brand: str, search_results: list[dict],
-    industry: str = "", model: str = "open-mistral-nemo",
+async def _analyze_with_llm(
+    provider: str, api_key: str, model: str,
+    brand: str, search_results: list[dict], industry: str = "",
 ) -> str:
-    """Use Mistral to filter and structure search results."""
-    client = Mistral(api_key=api_key)
-
+    """Ask the selected LLM to filter and structure search results."""
     formatted = []
     for i, r in enumerate(search_results, 1):
         date = r.get("fetched_date") or _date_from_url(r["href"])
@@ -224,18 +222,12 @@ def _analyze_with_mistral(
     industry_note = f" (отрасль: {industry})" if industry else ""
     prompt = SYSTEM_PROMPT.format(brand=brand, industry_note=industry_note)
 
-    response = client.chat.complete(
-        model=model,
-        messages=[
-            {"role": "system", "content": prompt},
-            {"role": "user", "content": search_text},
-        ],
-        temperature=0,
-        max_tokens=8000,
+    text = await llm_complete(
+        provider, api_key, model,
+        system=prompt, user=search_text,
+        max_tokens=8000, temperature=0,
     )
-
-    text = response.choices[0].message.content or ""
-    logger.info(f"Mistral response length for '{brand}': {len(text)}")
+    logger.info(f"LLM response length for '{brand}' ({provider}/{model}): {len(text)}")
     return text
 
 
@@ -285,10 +277,11 @@ async def search_brand_events(
     brand: str,
     api_key: str = "",
     industry: str = "",
-    model: str = "open-mistral-nemo",
+    model: str = "",
+    provider: str = "mistral",
 ) -> BrandEventsResponse:
     loop = asyncio.get_event_loop()
-    logger.info(f"Searching '{brand}', industry='{industry}'")
+    logger.info(f"Searching '{brand}', industry='{industry}', provider='{provider}', model='{model}'")
 
     # Step 1: DDG search
     search_results = await loop.run_in_executor(
@@ -300,28 +293,28 @@ async def search_brand_events(
         return BrandEventsResponse(brand=brand, events=[])
 
     # Step 2: enrich with article publication dates (parallel page fetch)
-    mistral_input = search_results[:30]
-    await _enrich_with_dates(mistral_input)
-    logger.info(f"Brand '{brand}': enriched dates for {sum(1 for r in mistral_input if r.get('fetched_date'))}/{len(mistral_input)} articles")
+    llm_input = search_results[:30]
+    await _enrich_with_dates(llm_input)
+    logger.info(f"Brand '{brand}': enriched dates for {sum(1 for r in llm_input if r.get('fetched_date'))}/{len(llm_input)} articles")
 
-    # Step 3: filter with Mistral
-    if api_key:
+    # Step 3: filter with the selected LLM
+    if api_key and model:
         events = []
         for attempt in range(3):
             try:
-                ai_response = await loop.run_in_executor(
-                    None, partial(_analyze_with_mistral, api_key, brand, mistral_input, industry, model)
+                ai_response = await _analyze_with_llm(
+                    provider, api_key, model, brand, llm_input, industry,
                 )
                 events = _parse_events(ai_response, brand)
                 if events:
                     break
-                logger.warning(f"Mistral returned 0 events for '{brand}', attempt {attempt + 1}/3")
+                logger.warning(f"LLM returned 0 events for '{brand}', attempt {attempt + 1}/3")
             except Exception as e:
-                logger.error(f"Mistral attempt {attempt + 1}/3 failed for '{brand}': {e}")
+                logger.error(f"LLM attempt {attempt + 1}/3 failed for '{brand}': {e}")
             if attempt < 2:
                 await asyncio.sleep(2)
         if not events:
-            logger.warning(f"All Mistral attempts failed for '{brand}', using raw results")
+            logger.warning(f"All LLM attempts failed for '{brand}', using raw results")
             events = _raw_to_events(brand, search_results)
     else:
         events = _raw_to_events(brand, search_results)
