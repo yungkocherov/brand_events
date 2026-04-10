@@ -83,7 +83,7 @@ SYSTEM_PROMPT = """\
 - event_name: краткое название события
 - event_date: дата в формате YYYY-MM-DD (если неизвестна — YYYY-MM-01)
 - description: 1-2 предложения
-- impact_category: СТРОГО одно из: market_exit, rebrand, new_product, supply, ad_campaign, scandal, sanctions, price_change, management, merger, pharma_registration, pharma_clinical, pharma_safety, custom
+- impact_category: СТРОГО одно из: market_exit, rebrand, new_product, supply, ad_campaign, scandal, sanctions, price_change, management, merger, pharma_registration, pharma_clinical, pharma_safety (или custom_N если событие связано с пользовательской темой)
 - impact_score: ЦЕЛОЕ число от 1 до 5, насколько событие повлияло на бизнес-метрики бренда (выручку, продажи, узнаваемость). 1=минимальное влияние, 5=критическое (уход с рынка, крупный скандал, ребрендинг)
 - sentiment: СТРОГО одно из: positive, negative, neutral
 - source_url: URL из результатов поиска
@@ -121,8 +121,8 @@ def _search_ddg(
         cfg = EVENT_TYPES.get(et)
         if cfg:
             queries.append((f'"{brand}" {cfg["keywords"]}{industry_suffix}', et))
-    for cq in (custom_queries or []):
-        queries.append((f'"{brand}" {cq}{industry_suffix}', "custom"))
+    for i, cq in enumerate(custom_queries or []):
+        queries.append((f'"{brand}" {cq}{industry_suffix}', f"custom_{i}"))
 
     with DDGS() as ddgs:
         for query, category in queries:
@@ -153,13 +153,20 @@ def _search_ddg(
 def _analyze_with_mistral(
     api_key: str, brand: str, search_results: list[dict],
     industry: str = "", model: str = "open-mistral-nemo",
+    custom_queries: list[str] | None = None,
 ) -> str:
     """Use Mistral to filter and structure search results."""
     client = Mistral(api_key=api_key)
 
+    custom_queries = custom_queries or []
     formatted = []
     for i, r in enumerate(search_results, 1):
-        cat_label = EVENT_TYPES.get(r["category"], {}).get("label", r["category"])
+        cat = r["category"]
+        if cat.startswith("custom_"):
+            idx = int(cat.split("_")[1])
+            cat_label = custom_queries[idx] if idx < len(custom_queries) else cat
+        else:
+            cat_label = EVENT_TYPES.get(cat, {}).get("label", cat)
         formatted.append(
             f"{i}. [{cat_label}] {r['title']}\n"
             f"   URL: {r['href']}\n"
@@ -168,7 +175,19 @@ def _analyze_with_mistral(
     search_text = "\n\n".join(formatted)
 
     industry_note = f" (отрасль: {industry})" if industry else ""
-    prompt = SYSTEM_PROMPT.format(brand=brand, industry_note=industry_note)
+
+    # Build extended category list including custom ones
+    custom_cats = ", ".join(f"custom_{i}" for i in range(len(custom_queries)))
+    custom_note = ""
+    if custom_queries:
+        custom_list = ", ".join(f'custom_{i}={q!r}' for i, q in enumerate(custom_queries))
+        custom_note = (
+            f"\n\nДОПОЛНИТЕЛЬНО: используй категории {custom_cats} для событий, "
+            f"связанных с темами: {custom_list}. "
+            f"События по этим темам ОБЯЗАТЕЛЬНО включи в результат."
+        )
+
+    prompt = SYSTEM_PROMPT.format(brand=brand, industry_note=industry_note) + custom_note
 
     response = client.chat.complete(
         model=model,
@@ -254,7 +273,7 @@ async def search_brand_events(
         for attempt in range(3):
             try:
                 ai_response = await loop.run_in_executor(
-                    None, partial(_analyze_with_mistral, api_key, brand, mistral_input, industry, model)
+                    None, partial(_analyze_with_mistral, api_key, brand, mistral_input, industry, model, custom_queries or [])
                 )
                 events = _parse_events(ai_response, brand)
                 if events:

@@ -416,7 +416,13 @@
     let sortAsc = false;
     let excluded = new Set();
 
-    function getCatLabel(key) { return eventTypesData[key] || key; }
+    function getCatLabel(key) {
+        if (key && key.startsWith('custom_')) {
+            const idx = parseInt(key.split('_')[1]);
+            return customQueries[idx] || key;
+        }
+        return eventTypesData[key] || key;
+    }
 
     let eventTypesData = {};
     let checkedStandardET = new Set();
